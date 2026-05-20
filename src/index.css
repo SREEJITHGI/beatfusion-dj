@@ -1,0 +1,205 @@
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700;900&family=Rajdhani:wght@500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  /* Custom fonts */
+  --font-display: 'Orbitron', 'Rajdhani', system-ui, sans-serif;
+  --font-sans: 'Inter', system-ui, sans-serif;
+  --font-tech: 'Rajdhani', system-ui, sans-serif;
+
+  /* Cyberpunk neon theme colors */
+  --color-cyber-dark: #070311;
+  --color-cyber-deep: #0f0a21;
+  --color-cyber-purple: #9d4edd;
+  --color-cyber-pink: #ff007f;
+  --color-cyber-cyan: #00f3ff;
+  --color-cyber-yellow: #ffea00;
+  --color-cyber-green: #39ff14;
+  --color-glass-card: rgba(15, 10, 33, 0.65);
+  --color-glass-border: rgba(255, 255, 255, 0.08);
+
+  /* Glow shadows */
+  --shadow-neon-pink: 0 0 10px rgba(255, 0, 127, 0.5), 0 0 25px rgba(255, 0, 127, 0.2);
+  --shadow-neon-cyan: 0 0 10px rgba(0, 243, 255, 0.5), 0 0 25px rgba(0, 243, 255, 0.2);
+  --shadow-neon-purple: 0 0 10px rgba(157, 78, 221, 0.5), 0 0 25px rgba(157, 78, 221, 0.2);
+  --shadow-glass: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+
+  /* Animations */
+  --animate-spin-slow: spin 20s linear infinite;
+  --animate-spin-fast: spin 3s linear infinite;
+  --animate-pulse-glow: pulse-glow 2s ease-in-out infinite;
+  --animate-scanline: scanline 8s linear infinite;
+  --animate-float: float 6s ease-in-out infinite;
+}
+
+@keyframes pulse-glow {
+  0%, 100% {
+    opacity: 0.3;
+    filter: drop-shadow(0 0 2px rgba(0, 243, 255, 0.3));
+  }
+  50% {
+    opacity: 0.9;
+    filter: drop-shadow(0 0 8px rgba(0, 243, 255, 0.8));
+  }
+}
+
+@keyframes scanline {
+  0% {
+    transform: translateY(-100%);
+  }
+  100% {
+    transform: translateY(100%);
+  }
+}
+
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+/* Custom Base Styles */
+html, body {
+  margin: 0;
+  padding: 0;
+  background-color: var(--color-cyber-dark);
+  color: #e2e8f0;
+  font-family: var(--font-sans);
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-cyber-purple) var(--color-cyber-dark);
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-cyber-dark);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-cyber-purple);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-cyber-pink);
+}
+
+/* Cyberpunk scanlines effect */
+.scanlines {
+  position: relative;
+  overflow: hidden;
+}
+.scanlines::before {
+  content: "";
+  display: block;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(
+    rgba(18, 16, 16, 0) 50%,
+    rgba(0, 0, 0, 0.25) 50%
+  );
+  background-size: 100% 4px;
+  z-index: 10;
+  pointer-events: none;
+}
+
+/* Cyberpunk Grid Background */
+.cyber-grid {
+  background-image: 
+    linear-gradient(rgba(157, 78, 221, 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(157, 78, 221, 0.07) 1px, transparent 1px);
+  background-size: 40px 40px;
+  background-position: center;
+}
+
+/* Glassmorphism card utility */
+.glass-panel {
+  background: var(--color-glass-card);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--color-glass-border);
+  box-shadow: var(--shadow-glass);
+}
+
+.glass-panel-glow-pink {
+  border: 1px solid rgba(255, 0, 127, 0.2);
+  box-shadow: 0 8px 32px 0 rgba(255, 0, 127, 0.1), var(--shadow-neon-pink);
+}
+
+.glass-panel-glow-cyan {
+  border: 1px solid rgba(0, 243, 255, 0.2);
+  box-shadow: 0 8px 32px 0 rgba(0, 243, 255, 0.1), var(--shadow-neon-cyan);
+}
+
+/* Glowing Neon Texts */
+.text-glow-pink {
+  text-shadow: 0 0 5px rgba(255, 0, 127, 0.8), 0 0 15px rgba(255, 0, 127, 0.4);
+}
+
+.text-glow-cyan {
+  text-shadow: 0 0 5px rgba(0, 243, 255, 0.8), 0 0 15px rgba(0, 243, 255, 0.4);
+}
+
+.text-glow-purple {
+  text-shadow: 0 0 5px rgba(157, 78, 221, 0.8), 0 0 15px rgba(157, 78, 221, 0.4);
+}
+
+/* Custom Knob Gradients */
+.knob-radial-bg {
+  background: radial-gradient(circle, #2d2645 0%, #150f24 70%, #0d091a 100%);
+}
+
+/* Neon Glow Buttons */
+.btn-neon-pink {
+  background: transparent;
+  color: #fff;
+  border: 1px solid var(--color-cyber-pink);
+  text-shadow: 0 0 5px #fff, 0 0 10px var(--color-cyber-pink);
+  box-shadow: 0 0 5px var(--color-cyber-pink), inset 0 0 5px var(--color-cyber-pink);
+  transition: all 0.3s ease;
+}
+.btn-neon-pink:hover {
+  background: var(--color-cyber-pink);
+  box-shadow: 0 0 15px var(--color-cyber-pink), 0 0 30px var(--color-cyber-pink);
+  text-shadow: 0 0 5px #fff;
+}
+
+.btn-neon-cyan {
+  background: transparent;
+  color: #fff;
+  border: 1px solid var(--color-cyber-cyan);
+  text-shadow: 0 0 5px #fff, 0 0 10px var(--color-cyber-cyan);
+  box-shadow: 0 0 5px var(--color-cyber-cyan), inset 0 0 5px var(--color-cyber-cyan);
+  transition: all 0.3s ease;
+}
+.btn-neon-cyan:hover {
+  background: var(--color-cyber-cyan);
+  color: #070311;
+  box-shadow: 0 0 15px var(--color-cyber-cyan), 0 0 30px var(--color-cyber-cyan);
+  text-shadow: none;
+}
+
+/* Vinyl Jog Wheel Animation */
+.vinyl-rotation {
+  transform-origin: center;
+  transition: transform 0.1s linear;
+}
+
+/* Reset original root override to use utility layout classes */
+#root {
+  width: 100% !important;
+  max-width: 100% !important;
+  margin: 0 !important;
+  border-inline: none !important;
+  min-height: 100svh !important;
+  display: block !important;
+  text-align: left !important;
+}
