@@ -309,7 +309,7 @@ export const MainStudioLayout: React.FC = () => {
               BEATFUSION <span className="text-cyber-cyan text-glow-cyan">DJ</span>
             </h1>
             <span className="font-tech text-[8px] text-gray-500 uppercase tracking-widest leading-none block">
-              Neural Audio Grid
+              Neural Audio Grid • Sreejith
             </span>
           </div>
         </div>

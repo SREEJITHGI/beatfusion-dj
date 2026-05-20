@@ -324,7 +324,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onEnterStudio, onShowA
       {/* Footer */}
       <footer className="py-8 bg-cyber-dark border-t border-white/5 px-4 text-center z-20">
         <p className="text-gray-600 text-[10px] font-tech uppercase tracking-widest">
-          © 2026 BEATFUSION DJ MIXER • MATRIX TERMINAL OPERATOR PROTOCOLS SECURED.
+          © 2026 BEATFUSION DJ MIXER • DESIGNED & DEVELOPED BY SREEJITH
+        </p>
+        <p className="text-gray-700 text-[9px] font-tech uppercase tracking-widest mt-1">
+          MATRIX TERMINAL OPERATOR PROTOCOLS SECURED.
         </p>
       </footer>
     </div>
