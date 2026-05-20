@@ -14,6 +14,7 @@ import {
   Layers, LogIn, LogOut, Square, Activity, MessageSquare, Home 
 } from 'lucide-react';
 import type { Track } from '../context/DJMixerContext';
+import { supabase } from '../utils/supabaseClient';
 
 export const MainStudioLayout: React.FC = () => {
   const {
@@ -62,10 +63,85 @@ export const MainStudioLayout: React.FC = () => {
   // Recording counter state
   const [recSeconds, setRecSeconds] = useState(0);
 
-  // Initialize tracks on mount
+  // Initialize session and tracks on mount
   useEffect(() => {
-    const loaded = getPresetTracks();
-    setTracks(loaded);
+    // 1. Load preset tracks
+    const loadedPresets = getPresetTracks();
+    setTracks(loadedPresets);
+
+    // 2. Fetch custom tracks from Supabase database
+    const fetchCustomTracks = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('tracks')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (error) throw error;
+        if (data) {
+          const customTracks: Track[] = data.map(item => ({
+            id: item.id.toString(),
+            title: item.title,
+            artist: item.artist,
+            genre: item.genre,
+            bpm: item.bpm,
+            duration: Number(item.duration),
+            url: item.url,
+            isProcedural: item.is_procedural || false
+          }));
+          setTracks(() => {
+            const all = [...customTracks, ...loadedPresets];
+            const unique = all.filter((v, i, a) => a.findIndex(t => t.id === v.id) === i);
+            return unique;
+          });
+        }
+      } catch (err) {
+        console.error('Error fetching custom tracks:', err);
+      }
+    };
+
+    fetchCustomTracks();
+
+    // 3. Check current session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', session.user.id)
+          .single()
+          .then(({ data: profile }) => {
+            setUser({
+              name: profile?.name || session.user.user_metadata?.name || session.user.email?.split('@')[0].toUpperCase() || 'USER',
+              role: (profile?.role || session.user.user_metadata?.role || 'Listener') as 'DJ' | 'Listener' | 'Admin',
+              email: session.user.email || '',
+            });
+          });
+      }
+    });
+
+    // 4. Listen to auth state changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (session?.user) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', session.user.id)
+          .single();
+
+        setUser({
+          name: profile?.name || session.user.user_metadata?.name || session.user.email?.split('@')[0].toUpperCase() || 'USER',
+          role: (profile?.role || session.user.user_metadata?.role || 'Listener') as 'DJ' | 'Listener' | 'Admin',
+          email: session.user.email || '',
+        });
+      } else {
+        setUser(null);
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
   // Sync Recording clock
@@ -319,7 +395,8 @@ export const MainStudioLayout: React.FC = () => {
                 <span className="text-[8px] font-tech text-cyber-cyan uppercase tracking-widest">{user.role}</span>
               </div>
               <button
-                onClick={() => {
+                onClick={async () => {
+                  await supabase.auth.signOut();
                   setUser(null);
                   setActiveTab('landing');
                 }}

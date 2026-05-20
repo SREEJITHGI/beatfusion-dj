@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Upload, Music, Users, Award, Play, Activity, Bell, Disc, FileAudio } from 'lucide-react';
 import type { Track } from '../context/DJMixerContext';
+import { supabase } from '../utils/supabaseClient';
 
 interface DJDashboardProps {
   user: { name: string; role: string; email: string };
@@ -77,7 +78,7 @@ export const DJDashboard: React.FC<DJDashboardProps> = ({
     }
   };
 
-  const processFile = (file: File) => {
+  const processFile = async (file: File) => {
     if (!file.name.endsWith('.mp3') && !file.name.endsWith('.wav') && !file.name.endsWith('.ogg')) {
       setUploadMsg('Error: Invalid format. Node accepts .mp3, .wav, or .ogg only.');
       return;
@@ -85,25 +86,74 @@ export const DJDashboard: React.FC<DJDashboardProps> = ({
 
     setUploadMsg('Analyzing BPM and sync grids...');
     
-    setTimeout(() => {
+    try {
       const randomBpm = Math.floor(Math.random() * 25) + 110; // 110 - 135 bpm
-      const localUrl = URL.createObjectURL(file);
+      const trackTitle = file.name.substring(0, file.name.lastIndexOf('.'));
       
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      let finalUrl = URL.createObjectURL(file); // Default local fallback
+      let trackId = `user-track-${Date.now()}`;
+
+      if (session?.user) {
+        setUploadMsg('Transmitting loop data to Supabase Storage...');
+        const fileExt = file.name.split('.').pop();
+        const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 7)}.${fileExt}`;
+        const filePath = `loops/${fileName}`;
+
+        // 1. Upload to storage bucket
+        const { error: uploadError } = await supabase.storage
+          .from('loops')
+          .upload(filePath, file);
+
+        if (uploadError) {
+          console.warn('Supabase storage upload failed, falling back to local memory blob:', uploadError);
+        } else {
+          // 2. Get public url
+          const { data: { publicUrl } } = supabase.storage.from('loops').getPublicUrl(filePath);
+          finalUrl = publicUrl;
+
+          // 3. Insert metadata record in tracks table
+          const { data: insertData, error: insertError } = await supabase
+            .from('tracks')
+            .insert({
+              title: trackTitle,
+              artist: user.name,
+              genre: 'User Upload',
+              bpm: randomBpm,
+              duration: 180,
+              url: finalUrl,
+              is_procedural: false,
+              user_id: session.user.id
+            })
+            .select();
+
+          if (insertError) {
+            console.warn('Supabase tracks table insert failed, falling back to local memory:', insertError);
+          } else if (insertData && insertData[0]) {
+            trackId = insertData[0].id.toString();
+          }
+        }
+      }
+
       const newTrack: Track = {
-        id: `user-track-${Date.now()}`,
-        title: file.name.substring(0, file.name.lastIndexOf('.')),
+        id: trackId,
+        title: trackTitle,
         artist: user.name,
         genre: 'User Upload',
         bpm: randomBpm,
-        duration: 180, // dummy duration
-        url: localUrl
+        duration: 180,
+        url: finalUrl
       };
 
       onUploadTrack(newTrack);
       setUploadMsg(`Successfully loaded: ${file.name} (Detected ${randomBpm} BPM).`);
       
       setTimeout(() => setUploadMsg(''), 4000);
-    }, 1500);
+    } catch (err: any) {
+      console.error(err);
+      setUploadMsg(`Upload failed: ${err.message || 'Matrix network error'}`);
+    }
   };
 
   // Mock Notifications (Cleared sample data)

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { MessageSquare, Send, Award, Users, ShieldAlert } from 'lucide-react';
 import confetti from 'canvas-confetti';
+import { supabase } from '../utils/supabaseClient';
 
 interface FloatingEmoji {
   id: number;
@@ -31,7 +32,65 @@ export const CommunityHub: React.FC = () => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages]);
 
-  // Simulate audience chat message arrivals
+  // Load chat messages and subscribe to Supabase Realtime Channel
+  useEffect(() => {
+    const fetchMessages = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('chat_messages')
+          .select('*')
+          .order('created_at', { ascending: true })
+          .limit(50);
+        
+        if (error) throw error;
+        if (data && data.length > 0) {
+          setChatMessages(data.map(m => ({
+            id: Number(m.id),
+            user: m.user_name,
+            text: m.text,
+            role: m.role as any,
+            color: m.color
+          })));
+        }
+      } catch (err) {
+        console.error('Error fetching chat logs from grid:', err);
+      }
+    };
+
+    fetchMessages();
+
+    // Subscribe to Postgres Insert events for chat_messages
+    const channel = supabase
+      .channel('chat_room')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages' }, (payload) => {
+        const newMessage = payload.new;
+        setChatMessages(prev => {
+          // Avoid duplicate insertions
+          if (prev.some(m => m.id === newMessage.id)) return prev;
+
+          // Trigger a random floating reaction
+          if (Math.random() < 0.5) {
+            const emojis = ['🔥', '❤️', '👏', '🎵', '⚡'];
+            triggerFloatingEmoji(emojis[Math.floor(Math.random() * emojis.length)]);
+          }
+
+          return [...prev, {
+            id: Number(newMessage.id),
+            user: newMessage.user_name,
+            text: newMessage.text,
+            role: newMessage.role as any,
+            color: newMessage.color
+          }];
+        });
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  // Simulate audience bot chat message arrivals in local single-player session
   useEffect(() => {
     const bots = [
       { name: 'EDM_FANATIC', text: 'This synth bassline is insane! 🚀', role: 'Viewer', color: 'text-gray-400' },
@@ -41,7 +100,6 @@ export const CommunityHub: React.FC = () => {
     ];
 
     const interval = setInterval(() => {
-      // 30% chance to push a random chat message
       if (Math.random() < 0.45) {
         const bot = bots[Math.floor(Math.random() * bots.length)];
         const newMsg: ChatMessage = {
@@ -53,43 +111,48 @@ export const CommunityHub: React.FC = () => {
         };
         setChatMessages(prev => [...prev, newMsg]);
 
-        // Auto trigger a floating emoji reaction
         const emojis = ['🔥', '❤️', '👏', '🎵', '⚡'];
         triggerFloatingEmoji(emojis[Math.floor(Math.random() * emojis.length)]);
       }
-    }, 5000);
+    }, 8000);
 
     return () => clearInterval(interval);
   }, []);
 
   const triggerFloatingEmoji = (char: string) => {
     const id = emojiIdRef.current++;
-    const left = Math.floor(Math.random() * 80) + 10; // 10% to 90%
+    const left = Math.floor(Math.random() * 80) + 10;
     setFloatingEmojis(prev => [...prev, { id, char, left }]);
 
-    // Remove after animation finishes (3 seconds)
     setTimeout(() => {
       setFloatingEmojis(prev => prev.filter(e => e.id !== id));
     }, 3000);
   };
 
-  const handleSendChat = (e: React.FormEvent) => {
+  const handleSendChat = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!chatInput.trim()) return;
 
+    const { data: { session } } = await supabase.auth.getSession();
+    const username = session?.user?.user_metadata?.name || 'ME_OPERATOR';
+    const rawRole = session?.user?.user_metadata?.role || 'DJ';
+    const role: 'DJ' | 'VIP' | 'Mod' | 'Viewer' = rawRole === 'Admin' ? 'Mod' : (rawRole as any);
+    const color = role === 'DJ' ? 'text-cyber-pink font-bold' : rawRole === 'Admin' ? 'text-cyber-yellow font-bold' : 'text-cyber-cyan';
+
+    const localId = Date.now();
     const userMsg: ChatMessage = {
-      id: Date.now(),
-      user: 'ME_OPERATOR',
+      id: localId,
+      user: username,
       text: chatInput,
-      role: 'DJ',
-      color: 'text-cyber-pink font-bold'
+      role,
+      color
     };
 
     setChatMessages(prev => [...prev, userMsg]);
+    const inputToSend = chatInput;
     setChatInput('');
 
-    // Trigger explosive confetti on chat send if it contains certain words
-    if (chatInput.toLowerCase().includes('drop') || chatInput.toLowerCase().includes('fire') || chatInput.toLowerCase().includes('confetti')) {
+    if (inputToSend.toLowerCase().includes('drop') || inputToSend.toLowerCase().includes('fire') || inputToSend.toLowerCase().includes('confetti')) {
       confetti({
         particleCount: 80,
         spread: 60,
@@ -98,27 +161,43 @@ export const CommunityHub: React.FC = () => {
       });
     }
 
-    // Trigger emoji reaction
     triggerFloatingEmoji('⚡');
 
-    // Simulate audience response 1.5 seconds later
-    setTimeout(() => {
-      const responses = [
-        "ME_OPERATOR is in the zone! 🎚️",
-        "Absolute fire drop!",
-        "Grid synced. Smooth!",
-        "Yes! Let's go!"
-      ];
-      const botResponse: ChatMessage = {
-        id: Date.now() + 1,
-        user: 'GRID_BOT',
-        text: responses[Math.floor(Math.random() * responses.length)],
-        role: 'Viewer',
-        color: 'text-cyber-cyan'
-      };
-      setChatMessages(prev => [...prev, botResponse]);
-      triggerFloatingEmoji('🔥');
-    }, 1500);
+    // Save message to database if user is logged in
+    if (session?.user) {
+      try {
+        await supabase.from('chat_messages').insert({
+          profile_id: session.user.id,
+          user_name: username,
+          text: inputToSend,
+          role: role,
+          color: color
+        });
+      } catch (err) {
+        console.error('Error inserting message:', err);
+      }
+    }
+
+    // Auto-respond locally
+    if (inputToSend.toLowerCase().includes('help') || Math.random() < 0.25) {
+      setTimeout(() => {
+        const responses = [
+          `${username} is in the zone! 🎚️`,
+          "Absolute fire drop!",
+          "Grid synced. Smooth!",
+          "Yes! Let's go!"
+        ];
+        const botResponse: ChatMessage = {
+          id: Date.now() + 1,
+          user: 'AUDIENCE_NODE',
+          text: responses[Math.floor(Math.random() * responses.length)],
+          role: 'Viewer',
+          color: 'text-cyber-cyan'
+        };
+        setChatMessages(prev => [...prev, botResponse]);
+        triggerFloatingEmoji('🔥');
+      }, 1500);
+    }
   };
 
   // Mock Leaderboard

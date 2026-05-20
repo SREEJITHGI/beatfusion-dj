@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Mail, Lock, User, Globe, LogIn, UserPlus } from 'lucide-react';
+import { supabase } from '../utils/supabaseClient';
 
 interface AuthSystemProps {
   onLoginSuccess: (user: { name: string; role: 'DJ' | 'Listener' | 'Admin'; email: string }) => void;
@@ -15,52 +16,105 @@ export const AuthSystem: React.FC<AuthSystemProps> = ({ onLoginSuccess }) => {
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setMessage('');
 
-    setTimeout(() => {
-      setLoading(false);
+    try {
       if (forgotPassword) {
+        const { error } = await supabase.auth.resetPasswordForEmail(email, {
+          redirectTo: window.location.origin,
+        });
+        if (error) throw error;
         setMessage('A reset link has been transmitted to your neural network email.');
+        setLoading(false);
         return;
       }
 
       if (isLogin) {
         if (!email || !password) {
           setMessage('Error: Missing grid credentials.');
+          setLoading(false);
           return;
         }
-        onLoginSuccess({
-          name: email.split('@')[0].toUpperCase(),
-          role,
-          email
+
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email,
+          password,
         });
+
+        if (error) throw error;
+
+        if (data.user) {
+          // Fetch custom profile role/name
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', data.user.id)
+            .single();
+
+          onLoginSuccess({
+            name: profile?.name || data.user.user_metadata?.name || email.split('@')[0].toUpperCase(),
+            role: (profile?.role || data.user.user_metadata?.role || role) as 'DJ' | 'Listener' | 'Admin',
+            email: data.user.email || email,
+          });
+        }
       } else {
         if (!email || !password || !name) {
           setMessage('Error: Form is incomplete.');
+          setLoading(false);
           return;
         }
-        onLoginSuccess({
-          name: name.toUpperCase(),
-          role,
-          email
+
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            data: {
+              name,
+              role,
+            },
+          },
         });
+
+        if (error) throw error;
+
+        if (data.user) {
+          if (data.session) {
+            onLoginSuccess({
+              name,
+              role,
+              email,
+            });
+          } else {
+            setMessage('Registration successful! Please check your email to verify your identity node.');
+          }
+        }
       }
-    }, 1200);
+    } catch (err: any) {
+      console.error(err);
+      setMessage(err.message || 'Error executing neural connection.');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleGoogleAuth = () => {
+  const handleGoogleAuth = async () => {
     setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
-      onLoginSuccess({
-        name: 'CYBER_USER',
-        role,
-        email: 'cyber_user@fusion.net'
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: window.location.origin,
+        },
       });
-    }, 1000);
+      if (error) throw error;
+    } catch (err: any) {
+      console.error(err);
+      setMessage(err.message || 'OAuth redirect failed.');
+      setLoading(false);
+    }
   };
 
   if (forgotPassword) {
