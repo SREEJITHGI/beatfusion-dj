@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Mail, Lock, User, Globe, LogIn, UserPlus } from 'lucide-react';
-import { supabase } from '../utils/supabaseClient';
+import { supabase, testSupabaseConnection } from '../utils/supabaseClient';
 
 interface AuthSystemProps {
   onLoginSuccess: (user: { name: string; role: 'DJ' | 'Listener' | 'Admin'; email: string }) => void;
@@ -15,6 +15,17 @@ export const AuthSystem: React.FC<AuthSystemProps> = ({ onLoginSuccess }) => {
   const [forgotPassword, setForgotPassword] = useState(false);
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
+  const [isOfflineMode, setIsOfflineMode] = useState(false);
+
+  useEffect(() => {
+    const checkDbConnectivity = async () => {
+      const conn = await testSupabaseConnection();
+      if (!conn.success) {
+        setIsOfflineMode(true);
+      }
+    };
+    checkDbConnectivity();
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -23,6 +34,11 @@ export const AuthSystem: React.FC<AuthSystemProps> = ({ onLoginSuccess }) => {
 
     try {
       if (forgotPassword) {
+        if (isOfflineMode) {
+          setMessage('Offline mode: Local passwords cannot be reset via email.');
+          setLoading(false);
+          return;
+        }
         const { error } = await supabase.auth.resetPasswordForEmail(email, {
           redirectTo: window.location.origin,
         });
@@ -37,6 +53,25 @@ export const AuthSystem: React.FC<AuthSystemProps> = ({ onLoginSuccess }) => {
           setMessage('Error: Missing grid credentials.');
           setLoading(false);
           return;
+        }
+
+        if (isOfflineMode) {
+          // Local Login Fallback
+          const localUsersRaw = localStorage.getItem('BEATFUSION_LOCAL_USERS');
+          const localUsers = localUsersRaw ? JSON.parse(localUsersRaw) : [];
+          const matchedUser = localUsers.find((u: any) => u.email === email && u.password === password);
+          if (matchedUser) {
+            const userData = {
+              name: matchedUser.name,
+              role: matchedUser.role,
+              email: matchedUser.email,
+            };
+            localStorage.setItem('BEATFUSION_ACTIVE_USER', JSON.stringify(userData));
+            onLoginSuccess(userData);
+            return;
+          } else {
+            throw new Error('Invalid grid credentials for local offline account.');
+          }
         }
 
         const { data, error } = await supabase.auth.signInWithPassword({
@@ -64,6 +99,23 @@ export const AuthSystem: React.FC<AuthSystemProps> = ({ onLoginSuccess }) => {
         if (!email || !password || !name) {
           setMessage('Error: Form is incomplete.');
           setLoading(false);
+          return;
+        }
+
+        if (isOfflineMode) {
+          // Local Signup Fallback
+          const localUsersRaw = localStorage.getItem('BEATFUSION_LOCAL_USERS');
+          const localUsers = localUsersRaw ? JSON.parse(localUsersRaw) : [];
+          if (localUsers.some((u: any) => u.email === email)) {
+            throw new Error('This email address is already registered on this node.');
+          }
+          const newUser = { name, email, password, role };
+          localUsers.push(newUser);
+          localStorage.setItem('BEATFUSION_LOCAL_USERS', JSON.stringify(localUsers));
+          
+          const userData = { name, role, email };
+          localStorage.setItem('BEATFUSION_ACTIVE_USER', JSON.stringify(userData));
+          onLoginSuccess(userData);
           return;
         }
 
@@ -101,6 +153,10 @@ export const AuthSystem: React.FC<AuthSystemProps> = ({ onLoginSuccess }) => {
   };
 
   const handleGoogleAuth = async () => {
+    if (isOfflineMode) {
+      setMessage('Google authentication is unavailable in offline sandbox mode.');
+      return;
+    }
     setLoading(true);
     try {
       const { error } = await supabase.auth.signInWithOAuth({
@@ -173,6 +229,12 @@ export const AuthSystem: React.FC<AuthSystemProps> = ({ onLoginSuccess }) => {
     <div className="w-full max-w-md p-8 glass-panel border-white/10 rounded-2xl relative overflow-hidden shadow-2xl">
       {/* Laser line effect */}
       <div className="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-transparent via-cyber-cyan to-transparent animate-pulse-glow" />
+      
+      {isOfflineMode && (
+        <div className="mb-4 p-2.5 bg-cyber-pink/10 border border-cyber-pink/30 rounded-xl text-center text-[10px] font-tech text-cyber-pink uppercase tracking-widest animate-pulse">
+          ⚠️ DATABASE OFFLINE: OPERATING IN LOCAL OFFLINE SANDBOX
+        </div>
+      )}
       
       <div className="text-center mb-6">
         <h2 className="font-display text-3xl font-extrabold tracking-widest text-white text-glow-cyan mb-1">

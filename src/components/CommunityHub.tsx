@@ -44,7 +44,7 @@ export const CommunityHub: React.FC = () => {
         
         if (error) throw error;
         if (data && data.length > 0) {
-          setChatMessages(data.map(m => ({
+          setChatMessages(data.map((m: any) => ({
             id: Number(m.id),
             user: m.user_name,
             text: m.text,
@@ -60,33 +60,44 @@ export const CommunityHub: React.FC = () => {
     fetchMessages();
 
     // Subscribe to Postgres Insert events for chat_messages
-    const channel = supabase
-      .channel('chat_room')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages' }, (payload) => {
-        const newMessage = payload.new;
-        setChatMessages(prev => {
-          // Avoid duplicate insertions
-          if (prev.some(m => m.id === newMessage.id)) return prev;
+    let channel: any = null;
+    try {
+      channel = supabase
+        .channel('chat_room')
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages' }, (payload: any) => {
+          const newMessage = payload.new;
+          setChatMessages(prev => {
+            // Avoid duplicate insertions
+            if (prev.some(m => m.id === newMessage.id)) return prev;
 
-          // Trigger a random floating reaction
-          if (Math.random() < 0.5) {
-            const emojis = ['🔥', '❤️', '👏', '🎵', '⚡'];
-            triggerFloatingEmoji(emojis[Math.floor(Math.random() * emojis.length)]);
-          }
+            // Trigger a random floating reaction
+            if (Math.random() < 0.5) {
+              const emojis = ['🔥', '❤️', '👏', '🎵', '⚡'];
+              triggerFloatingEmoji(emojis[Math.floor(Math.random() * emojis.length)]);
+            }
 
-          return [...prev, {
-            id: Number(newMessage.id),
-            user: newMessage.user_name,
-            text: newMessage.text,
-            role: newMessage.role as any,
-            color: newMessage.color
-          }];
-        });
-      })
-      .subscribe();
+            return [...prev, {
+              id: Number(newMessage.id),
+              user: newMessage.user_name,
+              text: newMessage.text,
+              role: newMessage.role as any,
+              color: newMessage.color
+            }];
+          });
+        })
+        .subscribe();
+    } catch (e) {
+      console.warn('Realtime channel subscription failed:', e);
+    }
 
     return () => {
-      supabase.removeChannel(channel);
+      if (channel) {
+        try {
+          supabase.removeChannel(channel);
+        } catch (e) {
+          console.warn('Failed to unsubscribe from channel:', e);
+        }
+      }
     };
   }, []);
 
@@ -133,9 +144,33 @@ export const CommunityHub: React.FC = () => {
     e.preventDefault();
     if (!chatInput.trim()) return;
 
-    const { data: { session } } = await supabase.auth.getSession();
-    const username = session?.user?.user_metadata?.name || 'ME_OPERATOR';
-    const rawRole = session?.user?.user_metadata?.role || 'DJ';
+    let username = 'ME_OPERATOR';
+    let rawRole = 'DJ';
+    let session = null;
+
+    try {
+      const sessionRes = await supabase.auth.getSession();
+      session = sessionRes?.data?.session;
+    } catch (e) {
+      console.warn('Failed to retrieve session for chat:', e);
+    }
+
+    if (session?.user) {
+      username = session.user.user_metadata?.name || session.user.email?.split('@')[0].toUpperCase() || 'ME_OPERATOR';
+      rawRole = session.user.user_metadata?.role || 'DJ';
+    } else {
+      const localUser = localStorage.getItem('BEATFUSION_ACTIVE_USER');
+      if (localUser) {
+        try {
+          const parsed = JSON.parse(localUser);
+          username = parsed.name || username;
+          rawRole = parsed.role || rawRole;
+        } catch (e) {
+          console.error('Failed to parse local active user for chat:', e);
+        }
+      }
+    }
+
     const role: 'DJ' | 'VIP' | 'Mod' | 'Viewer' = rawRole === 'Admin' ? 'Mod' : (rawRole as any);
     const color = role === 'DJ' ? 'text-cyber-pink font-bold' : rawRole === 'Admin' ? 'text-cyber-yellow font-bold' : 'text-cyber-cyan';
 
@@ -163,7 +198,7 @@ export const CommunityHub: React.FC = () => {
 
     triggerFloatingEmoji('⚡');
 
-    // Save message to database if user is logged in
+    // Save message to database if user is logged in and db is connected
     if (session?.user) {
       try {
         await supabase.from('chat_messages').insert({
@@ -174,7 +209,7 @@ export const CommunityHub: React.FC = () => {
           color: color
         });
       } catch (err) {
-        console.error('Error inserting message:', err);
+        console.error('Error inserting message to grid DB:', err);
       }
     }
 

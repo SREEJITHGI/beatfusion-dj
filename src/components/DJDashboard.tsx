@@ -90,49 +90,59 @@ export const DJDashboard: React.FC<DJDashboardProps> = ({
       const randomBpm = Math.floor(Math.random() * 25) + 110; // 110 - 135 bpm
       const trackTitle = file.name.substring(0, file.name.lastIndexOf('.'));
       
-      const { data: { session } } = await supabase.auth.getSession();
-      
       let finalUrl = URL.createObjectURL(file); // Default local fallback
       let trackId = `user-track-${Date.now()}`;
+      let session = null;
 
+      try {
+        const sessionRes = await supabase.auth.getSession();
+        session = sessionRes?.data?.session;
+      } catch (e) {
+        console.warn('Failed to retrieve session from Supabase, operating offline:', e);
+      }
+      
       if (session?.user) {
         setUploadMsg('Transmitting loop data to Supabase Storage...');
         const fileExt = file.name.split('.').pop();
         const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 7)}.${fileExt}`;
         const filePath = `loops/${fileName}`;
 
-        // 1. Upload to storage bucket
-        const { error: uploadError } = await supabase.storage
-          .from('loops')
-          .upload(filePath, file);
+        try {
+          // 1. Upload to storage bucket
+          const { error: uploadError } = await supabase.storage
+            .from('loops')
+            .upload(filePath, file);
 
-        if (uploadError) {
-          console.warn('Supabase storage upload failed, falling back to local memory blob:', uploadError);
-        } else {
-          // 2. Get public url
-          const { data: { publicUrl } } = supabase.storage.from('loops').getPublicUrl(filePath);
-          finalUrl = publicUrl;
+          if (uploadError) {
+            console.warn('Supabase storage upload failed, falling back to local memory blob:', uploadError);
+          } else {
+            // 2. Get public url
+            const { data: { publicUrl } } = supabase.storage.from('loops').getPublicUrl(filePath);
+            finalUrl = publicUrl;
 
-          // 3. Insert metadata record in tracks table
-          const { data: insertData, error: insertError } = await supabase
-            .from('tracks')
-            .insert({
-              title: trackTitle,
-              artist: user.name,
-              genre: 'User Upload',
-              bpm: randomBpm,
-              duration: 180,
-              url: finalUrl,
-              is_procedural: false,
-              user_id: session.user.id
-            })
-            .select();
+            // 3. Insert metadata record in tracks table
+            const { data: insertData, error: insertError } = await supabase
+              .from('tracks')
+              .insert({
+                title: trackTitle,
+                artist: user.name,
+                genre: 'User Upload',
+                bpm: randomBpm,
+                duration: 180,
+                url: finalUrl,
+                is_procedural: false,
+                user_id: session.user.id
+              })
+              .select();
 
-          if (insertError) {
-            console.warn('Supabase tracks table insert failed, falling back to local memory:', insertError);
-          } else if (insertData && insertData[0]) {
-            trackId = insertData[0].id.toString();
+            if (insertError) {
+              console.warn('Supabase tracks table insert failed, falling back to local memory:', insertError);
+            } else if (insertData && insertData[0]) {
+              trackId = insertData[0].id.toString();
+            }
           }
+        } catch (dbErr) {
+          console.warn('Supabase database transaction failed, falling back to local memory:', dbErr);
         }
       }
 
@@ -145,6 +155,12 @@ export const DJDashboard: React.FC<DJDashboardProps> = ({
         duration: 180,
         url: finalUrl
       };
+
+      // Persist the track metadata in localStorage so it stays in the user's library
+      const localTracksRaw = localStorage.getItem('BEATFUSION_LOCAL_TRACKS');
+      const localTracks = localTracksRaw ? JSON.parse(localTracksRaw) : [];
+      localTracks.unshift(newTrack);
+      localStorage.setItem('BEATFUSION_LOCAL_TRACKS', JSON.stringify(localTracks.slice(0, 10)));
 
       onUploadTrack(newTrack);
       setUploadMsg(`Successfully loaded: ${file.name} (Detected ${randomBpm} BPM).`);

@@ -11,10 +11,11 @@ import { AdminPanel } from './AdminPanel';
 import { WaveformVisualizer } from './WaveformVisualizer';
 import { 
   Disc, Volume2, ShieldAlert, Keyboard, Download, HelpCircle, 
-  Layers, LogIn, LogOut, Square, Activity, MessageSquare, Home 
+  Layers, LogIn, LogOut, Square, Activity, MessageSquare, Home,
+  Settings, Database
 } from 'lucide-react';
 import type { Track } from '../context/DJMixerContext';
-import { supabase } from '../utils/supabaseClient';
+import { supabase, testSupabaseConnection, isUsingCustomConnection, supabaseUrl } from '../utils/supabaseClient';
 
 export const MainStudioLayout: React.FC = () => {
   const {
@@ -56,6 +57,14 @@ export const MainStudioLayout: React.FC = () => {
   // Track database states
   const [tracks, setTracks] = useState<Track[]>([]);
 
+  // Database Connection settings state
+  const [isDbOffline, setIsDbOffline] = useState(false);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [dbUrlInput, setDbUrlInput] = useState('');
+  const [dbKeyInput, setDbKeyInput] = useState('');
+  const [testResult, setTestResult] = useState<{ success?: boolean; error?: string } | null>(null);
+  const [testingConnection, setTestingConnection] = useState(false);
+
 
   // Auto transition animation state
   const [transitioning, setTransitioning] = useState(false);
@@ -69,6 +78,16 @@ export const MainStudioLayout: React.FC = () => {
     const loadedPresets = getPresetTracks();
     setTracks(loadedPresets);
 
+    // Verify connectivity on mount
+    const checkDbConnection = async () => {
+      const conn = await testSupabaseConnection();
+      if (!conn.success) {
+        setIsDbOffline(true);
+        console.warn("Supabase connection is offline. Initializing local sandbox mode.");
+      }
+    };
+    checkDbConnection();
+
     // 2. Fetch custom tracks from Supabase database
     const fetchCustomTracks = async () => {
       try {
@@ -79,7 +98,7 @@ export const MainStudioLayout: React.FC = () => {
 
         if (error) throw error;
         if (data) {
-          const customTracks: Track[] = data.map(item => ({
+          const customTracks: Track[] = data.map((item: any) => ({
             id: item.id.toString(),
             title: item.title,
             artist: item.artist,
@@ -94,53 +113,105 @@ export const MainStudioLayout: React.FC = () => {
             const unique = all.filter((v, i, a) => a.findIndex(t => t.id === v.id) === i);
             return unique;
           });
+          return;
         }
       } catch (err) {
         console.error('Error fetching custom tracks:', err);
+      }
+
+      // Load custom tracks from localStorage as fallback
+      const storedTracks = localStorage.getItem('BEATFUSION_LOCAL_TRACKS');
+      if (storedTracks) {
+        try {
+          const parsed = JSON.parse(storedTracks);
+          setTracks(() => {
+            const all = [...parsed, ...loadedPresets];
+            const unique = all.filter((v, i, a) => a.findIndex(t => t.id === v.id) === i);
+            return unique;
+          });
+        } catch (e) {
+          console.error('Failed to parse local tracks:', e);
+        }
       }
     };
 
     fetchCustomTracks();
 
     // 3. Check current session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', session.user.id)
-          .single()
-          .then(({ data: profile }) => {
+    const loadSession = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', session.user.id)
+            .single();
+
+          setUser({
+            name: profile?.name || session.user.user_metadata?.name || session.user.email?.split('@')[0].toUpperCase() || 'USER',
+            role: (profile?.role || session.user.user_metadata?.role || 'Listener') as 'DJ' | 'Listener' | 'Admin',
+            email: session.user.email || '',
+          });
+          return;
+        }
+      } catch (err) {
+        console.warn('Failed to load session from Supabase:', err);
+      }
+
+      // Local session check
+      const localUser = localStorage.getItem('BEATFUSION_ACTIVE_USER');
+      if (localUser) {
+        try {
+          setUser(JSON.parse(localUser));
+        } catch (e) {
+          console.error('Failed to load local user session:', e);
+        }
+      }
+    };
+    loadSession();
+
+    // 4. Listen to auth state changes
+    let subscription: any = null;
+    try {
+      const res = supabase.auth.onAuthStateChange(async (_event: any, session: any) => {
+        if (session?.user) {
+          try {
+            const { data: profile } = await supabase
+              .from('profiles')
+              .select('*')
+              .eq('id', session.user.id)
+              .single();
+
             setUser({
               name: profile?.name || session.user.user_metadata?.name || session.user.email?.split('@')[0].toUpperCase() || 'USER',
               role: (profile?.role || session.user.user_metadata?.role || 'Listener') as 'DJ' | 'Listener' | 'Admin',
               email: session.user.email || '',
             });
-          });
-      }
-    });
-
-    // 4. Listen to auth state changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      if (session?.user) {
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', session.user.id)
-          .single();
-
-        setUser({
-          name: profile?.name || session.user.user_metadata?.name || session.user.email?.split('@')[0].toUpperCase() || 'USER',
-          role: (profile?.role || session.user.user_metadata?.role || 'Listener') as 'DJ' | 'Listener' | 'Admin',
-          email: session.user.email || '',
-        });
-      } else {
-        setUser(null);
-      }
-    });
+          } catch (profileErr) {
+            setUser({
+              name: session.user.user_metadata?.name || session.user.email?.split('@')[0].toUpperCase() || 'USER',
+              role: (session.user.user_metadata?.role || 'Listener') as 'DJ' | 'Listener' | 'Admin',
+              email: session.user.email || '',
+            });
+          }
+        } else {
+          // If no supabase session, make sure we aren't clearing an active local user session
+          const localUser = localStorage.getItem('BEATFUSION_ACTIVE_USER');
+          if (!localUser) {
+            setUser(null);
+          }
+        }
+      });
+      subscription = res?.data?.subscription;
+    } catch (e) {
+      console.warn('Failed to set up auth state change subscriber:', e);
+    }
 
     return () => {
-      subscription.unsubscribe();
+      if (subscription) {
+        subscription.unsubscribe();
+      }
     };
   }, []);
 
@@ -295,6 +366,25 @@ export const MainStudioLayout: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-cyber-dark text-white flex flex-col justify-between select-none scanlines">
+      {isDbOffline && (
+        <div className="bg-gradient-to-r from-red-950 via-cyber-pink/20 to-red-950 border-b border-cyber-pink/40 py-2 px-4 text-center text-xs font-tech text-cyber-pink tracking-widest flex items-center justify-center gap-2 animate-pulse z-50">
+          <ShieldAlert className="w-4 h-4 text-cyber-pink shrink-0" />
+          <span>DATABASE CONNECTION WARNING: DEFAULT GRID PROJECT REACHED LIMITS. RUNNING IN LOCAL OFFLINE SANDBOX.</span>
+          <button 
+            onClick={() => {
+              const savedUrl = localStorage.getItem('BEATFUSION_SUPABASE_URL') || '';
+              const savedKey = localStorage.getItem('BEATFUSION_SUPABASE_ANON_KEY') || '';
+              setDbUrlInput(savedUrl);
+              setDbKeyInput(savedKey);
+              setTestResult(null);
+              setShowSettingsModal(true);
+            }} 
+            className="underline text-cyber-cyan hover:text-white ml-2 font-bold cursor-pointer uppercase transition-colors"
+          >
+            Configure Database
+          </button>
+        </div>
+      )}
       
       {/* Navigation Bar */}
       <nav className="glass-panel border-b border-white/5 py-4 px-6 flex items-center justify-between sticky top-0 z-40 select-none">
@@ -388,6 +478,22 @@ export const MainStudioLayout: React.FC = () => {
 
         {/* User Session Handler */}
         <div className="flex items-center gap-3">
+          {/* Settings Gear Button */}
+          <button
+            onClick={() => {
+              const savedUrl = localStorage.getItem('BEATFUSION_SUPABASE_URL') || '';
+              const savedKey = localStorage.getItem('BEATFUSION_SUPABASE_ANON_KEY') || '';
+              setDbUrlInput(savedUrl);
+              setDbKeyInput(savedKey);
+              setTestResult(null);
+              setShowSettingsModal(true);
+            }}
+            className="p-2 bg-white/5 border border-white/10 hover:border-cyber-cyan hover:bg-cyber-cyan/15 rounded-xl text-gray-400 hover:text-cyber-cyan transition-all cursor-pointer mr-1"
+            title="Database Connection Settings"
+          >
+            <Settings className="w-4 h-4" />
+          </button>
+
           {user ? (
             <div className="flex items-center gap-3 bg-white/5 border border-white/10 px-3.5 py-1.5 rounded-xl">
               <div className="text-right">
@@ -396,7 +502,12 @@ export const MainStudioLayout: React.FC = () => {
               </div>
               <button
                 onClick={async () => {
-                  await supabase.auth.signOut();
+                  try {
+                    await supabase.auth.signOut();
+                  } catch (e) {
+                    console.warn('Sign out connection failed:', e);
+                  }
+                  localStorage.removeItem('BEATFUSION_ACTIVE_USER');
                   setUser(null);
                   setActiveTab('landing');
                 }}
@@ -673,6 +784,131 @@ export const MainStudioLayout: React.FC = () => {
               ×
             </button>
             <AuthSystem onLoginSuccess={handleLoginSuccess} />
+          </div>
+        </div>
+      )}
+
+      {/* Database Settings Modal */}
+      {showSettingsModal && (
+        <div className="fixed inset-0 bg-black/90 backdrop-blur-md flex items-center justify-center z-50 p-4">
+          <div className="relative w-full max-w-lg p-8 glass-panel border-cyber-cyan/30 rounded-2xl overflow-hidden shadow-2xl">
+            <div className="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-transparent via-cyber-cyan to-transparent animate-pulse-glow" />
+            
+            <button
+              onClick={() => setShowSettingsModal(false)}
+              className="absolute -top-3 -right-3 w-8 h-8 rounded-full bg-cyber-pink hover:bg-cyber-pink/80 text-white flex items-center justify-center font-bold shadow-neon-pink cursor-pointer z-50"
+            >
+              ×
+            </button>
+
+            <div className="text-center mb-6">
+              <h2 className="font-display text-2xl font-extrabold tracking-widest text-glow-cyan text-white flex items-center justify-center gap-2">
+                <Database className="w-6 h-6 text-cyber-cyan animate-pulse" /> GRID DATABASE CONFIG
+              </h2>
+              <p className="text-gray-400 text-xs uppercase tracking-wider font-tech mt-1">
+                Customize your backend connection endpoints
+              </p>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-tech text-gray-400 uppercase tracking-widest mb-1.5 text-left">
+                  Supabase Project URL
+                </label>
+                <input
+                  type="text"
+                  value={dbUrlInput}
+                  onChange={(e) => setDbUrlInput(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-cyber-dark border border-white/10 rounded-lg text-white font-tech placeholder-gray-700 focus:outline-none focus:border-cyber-cyan text-sm"
+                  placeholder="https://your-project.supabase.co"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-tech text-gray-400 uppercase tracking-widest mb-1.5 text-left">
+                  Supabase Anon Key
+                </label>
+                <input
+                  type="password"
+                  value={dbKeyInput}
+                  onChange={(e) => setDbKeyInput(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-cyber-dark border border-white/10 rounded-lg text-white font-tech placeholder-gray-700 focus:outline-none focus:border-cyber-cyan text-sm"
+                  placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                />
+              </div>
+
+              {/* Status information */}
+              <div className="p-3.5 bg-black/60 border border-white/5 rounded-xl text-xs space-y-1 text-left">
+                <div className="flex justify-between font-tech text-[10px]">
+                  <span className="text-gray-500 uppercase">Active URL:</span>
+                  <span className="text-white truncate max-w-[250px]" title={supabaseUrl}>
+                    {supabaseUrl || 'None configured'}
+                  </span>
+                </div>
+                <div className="flex justify-between font-tech text-[10px]">
+                  <span className="text-gray-500 uppercase">Configuration Source:</span>
+                  <span className={isUsingCustomConnection() ? 'text-cyber-pink font-bold' : 'text-cyber-green'}>
+                    {isUsingCustomConnection() ? 'User LocalStorage Override' : 'System Environment Default'}
+                  </span>
+                </div>
+              </div>
+
+              {testResult && (
+                <div className={`p-3 border rounded-lg text-xs font-tech text-center ${
+                  testResult.success 
+                    ? 'bg-cyber-green/10 border-cyber-green/30 text-cyber-green' 
+                    : 'bg-cyber-pink/10 border-cyber-pink/30 text-cyber-pink'
+                }`}>
+                  {testResult.success 
+                    ? '✓ CONNECTION VERIFIED: Ready for grid synchronization.' 
+                    : `✗ CONNECTION FAILED: ${testResult.error || 'Check endpoints and keys.'}`}
+                </div>
+              )}
+
+              <div className="grid grid-cols-3 gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setTestingConnection(true);
+                    setTestResult(null);
+                    const res = await testSupabaseConnection(dbUrlInput.trim(), dbKeyInput.trim());
+                    setTestResult(res);
+                    setTestingConnection(false);
+                  }}
+                  disabled={testingConnection || !dbUrlInput.trim() || !dbKeyInput.trim()}
+                  className="py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-tech text-xs uppercase tracking-widest rounded-lg transition-all disabled:opacity-30 cursor-pointer"
+                >
+                  {testingConnection ? 'Testing...' : 'Test Connection'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (dbUrlInput.trim() && dbKeyInput.trim()) {
+                      localStorage.setItem('BEATFUSION_SUPABASE_URL', dbUrlInput.trim());
+                      localStorage.setItem('BEATFUSION_SUPABASE_ANON_KEY', dbKeyInput.trim());
+                      window.location.reload();
+                    }
+                  }}
+                  disabled={!dbUrlInput.trim() || !dbKeyInput.trim()}
+                  className="py-2.5 bg-cyber-cyan text-cyber-dark font-display font-extrabold tracking-widest text-xs rounded-lg transition-all shadow-neon-cyan hover:scale-[1.02] disabled:opacity-30 cursor-pointer text-center"
+                >
+                  Save & Sync
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    localStorage.removeItem('BEATFUSION_SUPABASE_URL');
+                    localStorage.removeItem('BEATFUSION_SUPABASE_ANON_KEY');
+                    window.location.reload();
+                  }}
+                  className="py-2.5 bg-cyber-pink/10 hover:bg-cyber-pink/20 border border-cyber-pink/30 text-cyber-pink font-tech text-xs uppercase tracking-widest rounded-lg transition-all cursor-pointer"
+                >
+                  Reset Defaults
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
